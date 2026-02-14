@@ -8,7 +8,12 @@ function loadSettings(): AppSettings {
   try {
     const stored = localStorage.getItem(SETTINGS_KEY);
     if (stored) {
-      return { ...DEFAULT_SETTINGS, ...JSON.parse(stored) };
+      const parsed = JSON.parse(stored);
+      // Backfill default backend URL for users who saved before it was set
+      if (!parsed.backendUrl) {
+        parsed.backendUrl = DEFAULT_SETTINGS.backendUrl;
+      }
+      return { ...DEFAULT_SETTINGS, ...parsed };
     }
   } catch {
     // Ignore parse errors

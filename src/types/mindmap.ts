@@ -121,5 +121,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
   theme: 'dark',
   speakerNames: {},
   showTranscript: true,
-  backendUrl: '',
+  backendUrl: 'https://mindflow-api-939950786236.us-central1.run.app',
 };
