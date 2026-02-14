@@ -168,7 +168,7 @@ export async function search(
 export async function healthCheck(baseUrl: string): Promise<boolean> {
   try {
     const url = `${normalizeBaseUrl(baseUrl)}/api/health`;
-    const response = await fetchWithTimeout(url, { method: 'GET' }, 5000);
+    const response = await fetchWithTimeout(url, { method: 'GET' }, 30000);
 
     if (!response.ok) return false;
 
