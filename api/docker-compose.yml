@@ -1,0 +1,22 @@
+services:
+  falkordb:
+    image: falkordb/falkordb:latest
+    ports:
+      - "6379:6379"
+      - "3000:3000"
+    volumes:
+      - falkordb_data:/data
+
+  api:
+    build: .
+    ports:
+      - "8080:8080"
+    depends_on:
+      - falkordb
+    environment:
+      - FALKORDB_HOST=falkordb
+      - FALKORDB_PORT=6379
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+
+volumes:
+  falkordb_data:

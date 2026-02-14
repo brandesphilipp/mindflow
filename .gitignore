@@ -9,3 +9,9 @@ dist/
 
 # Local Netlify folder
 .netlify
+
+# Python backend
+api/__pycache__/
+api/*.pyc
+api/venv/
+api/.env

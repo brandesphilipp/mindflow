@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { MindMapView } from './components/MindMapView';
 import { ControlBar } from './components/ControlBar';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -6,12 +6,14 @@ import { TranscriptTicker } from './components/TranscriptTicker';
 import { OnboardingScreen } from './components/OnboardingScreen';
 import { ExportMenu } from './components/ExportMenu';
 import { SessionManager } from './components/SessionManager';
+import { InsightsPanel } from './components/InsightsPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { useSettings } from './hooks/useSettings';
 import { useDeepgram } from './hooks/useDeepgram';
 import { useMindMap } from './hooks/useMindMap';
+import { useInsights } from './hooks/useInsights';
 import { useSessions } from './hooks/useSessions';
-import type { TranscriptChunk } from './types/mindmap';
+import type { TranscriptChunk, MindMap, KnowledgeGraph } from './types/mindmap';
 
 export default function App() {
   const { settings, updateSettings, isConfigured, getLLMApiKey } = useSettings();
@@ -28,12 +30,38 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [sessionsOpen, setSessionsOpen] = useState(false);
+  const [insightsOpen, setInsightsOpen] = useState(false);
+  const [autoFocusEnabled, setAutoFocusEnabled] = useState(true);
   const [transcriptChunks, setTranscriptChunks] = useState<TranscriptChunk[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const {
+    insights,
+    undismissedCount,
+    isGenerating: isGeneratingInsights,
+    maybeGenerateInsights,
+    dismissInsight,
+    dismissAll: dismissAllInsights,
+    clearInsights,
+  } = useInsights({
+    llmProvider: settings.llmProvider,
+    llmApiKey: getLLMApiKey(),
+    insightMode: settings.insightMode,
+  });
+
+  // Wrap autoSave to accept optional knowledgeGraph
+  const handleAutoSave = useCallback(
+    (mindMap: MindMap | null, transcript: string, knowledgeGraph?: KnowledgeGraph | null) => {
+      autoSave(mindMap, transcript, knowledgeGraph ?? null);
+    },
+    [autoSave]
+  );
+
+  const {
     mindMap,
     setMindMap,
+    knowledgeGraph,
+    setKnowledgeGraph,
     isProcessing,
     llmError,
     clearError: clearLlmError,
@@ -43,16 +71,45 @@ export default function App() {
     stopProcessingLoop,
     resetMindMap,
     forceFullRegen,
+    activeNodeIds,
   } = useMindMap({
     llmProvider: settings.llmProvider,
     llmApiKey: getLLMApiKey(),
+    openaiApiKey: settings.openaiApiKey,
     interpretationLevel: settings.interpretationLevel,
-    onAutoSave: autoSave,
+    backendUrl: settings.backendUrl,
+    sessionId: currentSessionId,
+    onAutoSave: handleAutoSave,
+    onProcessed: maybeGenerateInsights,
   });
 
   const onTranscript = useCallback(
     (chunk: TranscriptChunk) => {
-      setTranscriptChunks((prev) => [...prev.slice(-50), chunk]);
+      setTranscriptChunks((prev) => {
+        const updated = [...prev];
+
+        // Remove previous interim from same speaker (both interim→final and interim→interim)
+        for (let i = updated.length - 1; i >= 0; i--) {
+          if (!updated[i].isFinal && updated[i].speaker === chunk.speaker) {
+            updated.splice(i, 1);
+            break;
+          }
+        }
+
+        // Dedup: skip if the last final from same speaker has identical text
+        if (chunk.isFinal) {
+          for (let i = updated.length - 1; i >= 0; i--) {
+            if (updated[i].isFinal && updated[i].speaker === chunk.speaker) {
+              if (updated[i].text === chunk.text) return prev; // skip duplicate
+              // Also skip if new text is a substring of the last (overlapping progressive finals)
+              if (updated[i].text.includes(chunk.text)) return prev;
+              break;
+            }
+          }
+        }
+
+        return [...updated.slice(-50), chunk];
+      });
       addTranscriptChunk(chunk);
     },
     [addTranscriptChunk]
@@ -69,18 +126,6 @@ export default function App() {
     onTranscript,
     onUtteranceEnd: handleUtteranceEnd,
   });
-
-  // Keyboard shortcut: Space to toggle recording (when not in an input)
-  useEffect(() => {
-    const handleKeydown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
-        e.preventDefault();
-        handleToggleRecord();
-      }
-    };
-    window.addEventListener('keydown', handleKeydown);
-    return () => window.removeEventListener('keydown', handleKeydown);
-  }, []);
 
   const handleToggleRecord = useCallback(async () => {
     if (isRecording) {
@@ -112,6 +157,52 @@ export default function App() {
     createSession,
   ]);
 
+  // Use ref so keyboard handler always calls latest version (no stale closure)
+  const toggleRecordRef = useRef(handleToggleRecord);
+  toggleRecordRef.current = handleToggleRecord;
+
+  // Keyboard shortcut: Space to toggle recording (when not in an input)
+  useEffect(() => {
+    const handleKeydown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
+        e.preventDefault();
+        toggleRecordRef.current();
+      }
+    };
+    window.addEventListener('keydown', handleKeydown);
+    return () => window.removeEventListener('keydown', handleKeydown);
+  }, []);
+
+  // Save session state before browser tab closes
+  const autoSaveRef = useRef(handleAutoSave);
+  autoSaveRef.current = handleAutoSave;
+  const mindMapRef = useRef(mindMap);
+  mindMapRef.current = mindMap;
+  const knowledgeGraphRef = useRef(knowledgeGraph);
+  knowledgeGraphRef.current = knowledgeGraph;
+
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      autoSaveRef.current(mindMapRef.current, '', knowledgeGraphRef.current);
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
+
+  // Auto-restore last session on mount
+  useEffect(() => {
+    if (currentSessionId) {
+      const session = loadSession(currentSessionId);
+      if (session?.mindMap) {
+        setMindMap(session.mindMap);
+      }
+      if (session?.knowledgeGraph) {
+        setKnowledgeGraph(session.knowledgeGraph);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only on mount
+
   const handleDismissError = useCallback(() => {
     setError(null);
     clearLlmError();
@@ -125,18 +216,24 @@ export default function App() {
         if (session.mindMap) {
           setMindMap(session.mindMap);
         }
+        if (session.knowledgeGraph) {
+          setKnowledgeGraph(session.knowledgeGraph);
+        }
       }
     },
-    [loadSession, setCurrentSessionId, setMindMap]
+    [loadSession, setCurrentSessionId, setMindMap, setKnowledgeGraph]
   );
 
   const handleNewSession = useCallback(() => {
     resetMindMap();
     setTranscriptChunks([]);
+    clearInsights();
     createSession();
-  }, [resetMindMap, createSession]);
+  }, [resetMindMap, createSession, clearInsights]);
 
   const displayError = error || deepgramError || llmError;
+
+  const hasContent = mindMap !== null || (knowledgeGraph !== null && knowledgeGraph.entities.length > 0);
 
   // Show onboarding if not configured
   if (!isConfigured && !settingsOpen) {
@@ -178,7 +275,14 @@ export default function App() {
       {/* Main Mind Map */}
       <div className="flex-1 relative">
         <ErrorBoundary>
-          <MindMapView mindMap={mindMap} isProcessing={isProcessing} />
+          <MindMapView
+            mindMap={mindMap}
+            knowledgeGraph={knowledgeGraph}
+            isProcessing={isProcessing}
+            speakerNames={settings.speakerNames}
+            activeNodeIds={activeNodeIds}
+            autoFocusEnabled={autoFocusEnabled}
+          />
         </ErrorBoundary>
       </div>
 
@@ -200,7 +304,11 @@ export default function App() {
         onOpenSessions={() => setSessionsOpen(true)}
         onExport={() => setExportOpen(true)}
         onForceRegen={forceFullRegen}
-        hasMap={mindMap !== null}
+        onOpenInsights={() => setInsightsOpen(true)}
+        insightsBadge={undismissedCount}
+        autoFocusEnabled={autoFocusEnabled}
+        onToggleAutoFocus={() => setAutoFocusEnabled((p) => !p)}
+        hasMap={hasContent}
       />
 
       {/* Settings Panel */}
@@ -212,11 +320,12 @@ export default function App() {
       />
 
       {/* Export Menu */}
-      {mindMap && (
+      {hasContent && (
         <ExportMenu
           isOpen={exportOpen}
           onClose={() => setExportOpen(false)}
           mindMap={mindMap}
+          knowledgeGraph={knowledgeGraph}
         />
       )}
 
@@ -229,6 +338,18 @@ export default function App() {
         onLoadSession={handleLoadSession}
         onDeleteSession={deleteSession}
         onNewSession={handleNewSession}
+      />
+
+      {/* Insights Panel */}
+      <InsightsPanel
+        isOpen={insightsOpen}
+        onClose={() => setInsightsOpen(false)}
+        insights={insights}
+        insightMode={settings.insightMode}
+        onModeChange={(mode) => updateSettings({ insightMode: mode })}
+        onDismiss={dismissInsight}
+        onDismissAll={dismissAllInsights}
+        isGenerating={isGeneratingInsights}
       />
     </div>
   );

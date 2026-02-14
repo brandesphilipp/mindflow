@@ -27,7 +27,7 @@ async function callAnthropic(
     },
     body: JSON.stringify({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 4096,
+      max_tokens: 8192,
       system: systemPrompt + '\n\nYou MUST respond with ONLY valid JSON. No markdown, no code fences, no explanation.',
       messages: [{ role: 'user', content: userMessage }],
     }),
@@ -58,7 +58,7 @@ async function callOpenAI(
     },
     body: JSON.stringify({
       model: 'gpt-4.1-mini',
-      max_tokens: 4096,
+      max_tokens: 8192,
       response_format: {
         type: 'json_schema',
         json_schema: {
@@ -86,6 +86,17 @@ async function callOpenAI(
   return parseMindMapJSON(text);
 }
 
+function looksLikeNode(obj: Record<string, unknown>): boolean {
+  return typeof obj.id === 'string' && typeof obj.label === 'string';
+}
+
+function ensureChildren(node: Record<string, unknown>): void {
+  if (!Array.isArray(node.children)) node.children = [];
+  for (const child of node.children as Record<string, unknown>[]) {
+    if (child && typeof child === 'object') ensureChildren(child);
+  }
+}
+
 function parseMindMapJSON(text: string): MindMap {
   // Strip markdown code fences if present
   let cleaned = text.trim();
@@ -95,23 +106,52 @@ function parseMindMapJSON(text: string): MindMap {
 
   const parsed = JSON.parse(cleaned);
 
-  // Validate basic structure
-  if (!parsed.root || typeof parsed.root.id !== 'string') {
+  // Try to find the root node in various possible structures
+  let root: Record<string, unknown> | null = null;
+
+  if (parsed.root && typeof parsed.root === 'object' && looksLikeNode(parsed.root)) {
+    // Standard expected format: { root: { id, label, ... } }
+    root = parsed.root;
+  } else if (looksLikeNode(parsed)) {
+    // LLM returned the root node directly as top-level object
+    root = parsed;
+  } else if (parsed.mind_map?.root && looksLikeNode(parsed.mind_map.root)) {
+    // Wrapped in mind_map key
+    root = parsed.mind_map.root;
+  } else if (parsed.mindMap?.root && looksLikeNode(parsed.mindMap.root)) {
+    // camelCase variant
+    root = parsed.mindMap.root;
+  } else {
+    // Last resort: find any object with id + label + children in top-level keys
+    for (const key of Object.keys(parsed)) {
+      const val = parsed[key];
+      if (val && typeof val === 'object' && !Array.isArray(val) && looksLikeNode(val)) {
+        root = val;
+        break;
+      }
+    }
+  }
+
+  if (!root) {
+    console.error('LLM returned unparseable mind map:', text.slice(0, 500));
     throw new Error('Invalid mind map structure: missing root node');
   }
 
-  // Ensure crossReferences and metadata exist
-  if (!parsed.crossReferences) parsed.crossReferences = [];
-  if (!parsed.metadata) {
-    parsed.metadata = {
-      version: 1,
-      totalSpeakers: 0,
-      durationSeconds: 0,
-      lastUpdated: new Date().toISOString(),
-    };
-  }
+  // Ensure required fields
+  if (!root.type) root.type = 'topic';
+  if (root.speaker === undefined) root.speaker = null;
+  if (root.timestamp === undefined) root.timestamp = null;
+  ensureChildren(root);
 
-  return parsed as MindMap;
+  const crossReferences = parsed.crossReferences || parsed.cross_references || [];
+  const metadata = parsed.metadata || {
+    version: 1,
+    totalSpeakers: 0,
+    durationSeconds: 0,
+    lastUpdated: new Date().toISOString(),
+  };
+
+  return { root, crossReferences, metadata } as unknown as MindMap;
 }
 
 async function callLLM(
@@ -126,6 +166,30 @@ async function callLLM(
   }
 }
 
+const SIMPLIFIED_RETRY_PREFIX = 'The previous response was truncated. Return a SIMPLIFIED mind map with ONLY the root node and up to 8 direct children (no deeper nesting). Each child summarizes a theme. Return valid JSON only.\n\n';
+
+async function callLLMWithRetry(
+  config: LLMConfig,
+  systemPrompt: string,
+  userMessage: string
+): Promise<MindMap> {
+  try {
+    return await callLLM(config, systemPrompt, userMessage);
+  } catch (err) {
+    const msg = (err as Error).message;
+    // Only retry on JSON parse errors, not API errors
+    if (msg.includes('JSON') || msg.includes('Unexpected') || msg.includes('Invalid mind map')) {
+      console.warn('MindFlow: JSON parse failed, retrying with simplified prompt');
+      try {
+        return await callLLM(config, systemPrompt, SIMPLIFIED_RETRY_PREFIX + userMessage);
+      } catch {
+        throw err;
+      }
+    }
+    throw err;
+  }
+}
+
 export async function incrementalUpdate(
   config: LLMConfig,
   currentMap: MindMap,
@@ -137,7 +201,7 @@ export async function incrementalUpdate(
     JSON.stringify(currentMap, null, 2),
     newTranscript
   );
-  return callLLM(config, systemPrompt, userMessage);
+  return callLLMWithRetry(config, systemPrompt, userMessage);
 }
 
 export async function fullRegeneration(
@@ -147,7 +211,7 @@ export async function fullRegeneration(
 ): Promise<MindMap> {
   const systemPrompt = getFullRegenSystemPrompt(level);
   const userMessage = buildFullRegenUserMessage(fullTranscript);
-  return callLLM(config, systemPrompt, userMessage);
+  return callLLMWithRetry(config, systemPrompt, userMessage);
 }
 
 export async function testLLMKey(provider: LLMProvider, apiKey: string): Promise<boolean> {

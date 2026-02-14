@@ -35,10 +35,12 @@ export function useSettings() {
     });
   }, []);
 
+  // OpenAI key is always required (for LLM or embeddings).
+  // Anthropic key is only required when Anthropic is the selected LLM provider.
   const isConfigured = Boolean(
     settings.deepgramApiKey &&
-      ((settings.llmProvider === 'anthropic' && settings.anthropicApiKey) ||
-        (settings.llmProvider === 'openai' && settings.openaiApiKey))
+      settings.openaiApiKey &&
+      (settings.llmProvider === 'openai' || settings.anthropicApiKey)
   );
 
   const getLLMApiKey = useCallback((): string => {

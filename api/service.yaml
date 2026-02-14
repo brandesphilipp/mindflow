@@ -1,0 +1,52 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: mindflow-api
+  annotations:
+    run.googleapis.com/launch-stage: BETA
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "2"
+        run.googleapis.com/container-dependencies: '{"api":["falkordb"]}'
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      containers:
+        - name: api
+          image: us-central1-docker.pkg.dev/mindflow-live-076048/mindflow/api:v3
+          ports:
+            - containerPort: 8080
+          env:
+            - name: FALKORDB_HOST
+              value: "localhost"
+            - name: FALKORDB_PORT
+              value: "6379"
+          resources:
+            limits:
+              memory: "512Mi"
+              cpu: "1"
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 10
+        - name: falkordb
+          image: falkordb/falkordb:latest
+          env:
+            - name: FALKORDB_ARGS
+              value: "--save ''"
+          resources:
+            limits:
+              memory: "512Mi"
+              cpu: "1"
+          startupProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 2
+            periodSeconds: 2
+            failureThreshold: 10

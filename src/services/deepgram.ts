@@ -17,6 +17,7 @@ export class DeepgramService {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 3;
   private recordingStartTime = 0;
+  private errorEmitted = false;
 
   constructor(apiKey: string, callbacks: DeepgramCallbacks) {
     this.apiKey = apiKey;
@@ -54,6 +55,7 @@ export class DeepgramService {
     url.searchParams.set('smart_format', 'true');
     url.searchParams.set('punctuate', 'true');
 
+    this.errorEmitted = false;
     this.ws = new WebSocket(url.toString(), ['token', this.apiKey]);
 
     this.ws.onopen = () => {
@@ -74,15 +76,40 @@ export class DeepgramService {
           if (!transcript) return;
 
           const words = alternative.words || [];
-          const speaker = words.length > 0 ? (words[0].speaker ?? null) : null;
           const isFinal = data.is_final === true;
           const timestamp = (Date.now() - this.recordingStartTime) / 1000;
+
+          // Majority-vote speaker across all words (handles delayed diarization)
+          let speaker: number | null = null;
+          if (words.length > 0) {
+            const counts = new Map<number, number>();
+            for (const w of words) {
+              if (w.speaker != null) {
+                counts.set(w.speaker, (counts.get(w.speaker) || 0) + 1);
+              }
+            }
+            let maxCount = 0;
+            for (const [spk, count] of counts) {
+              if (count > maxCount) {
+                maxCount = count;
+                speaker = spk;
+              }
+            }
+          }
+
+          // Average word confidence
+          let confidence = 1;
+          if (words.length > 0) {
+            const total = words.reduce((sum: number, w: { confidence?: number }) => sum + (w.confidence ?? 1), 0);
+            confidence = total / words.length;
+          }
 
           this.callbacks.onTranscript({
             text: transcript,
             speaker,
             isFinal,
             timestamp,
+            confidence,
           });
         }
 
@@ -95,15 +122,60 @@ export class DeepgramService {
     };
 
     this.ws.onerror = () => {
-      this.callbacks.onError(new Error('Deepgram WebSocket error'));
+      // Only emit if onclose hasn't already handled it (onerror fires before onclose)
+      if (!this.errorEmitted) {
+        if (!navigator.onLine) {
+          this.errorEmitted = true;
+          this.callbacks.onError(new Error('No internet connection. Please check your network.'));
+        }
+        // Otherwise let onclose provide the specific message via close code
+      }
     };
 
-    this.ws.onclose = () => {
+    this.ws.onclose = (event) => {
+      console.warn('Deepgram WebSocket closed:', event.code, event.reason);
       this.callbacks.onClose();
+
+      // Map close codes to actionable messages
+      if (event.code === 1000) {
+        // Normal close — no error
+        return;
+      }
+
+      if (event.code === 1008) {
+        // Auth failure — fail fast, don't reconnect
+        if (!this.errorEmitted) {
+          this.errorEmitted = true;
+          this.callbacks.onError(new Error('Invalid Deepgram API key. Please check Settings.'));
+        }
+        this.reconnectAttempts = this.maxReconnectAttempts; // skip retries
+        return;
+      }
+
+      // Attempt reconnection for recoverable errors
       if (this.reconnectAttempts < this.maxReconnectAttempts && this.stream) {
         this.reconnectAttempts++;
         const delay = Math.pow(2, this.reconnectAttempts) * 1000;
+
+        if (!this.errorEmitted) {
+          this.errorEmitted = true;
+          if (event.code === 1006) {
+            this.callbacks.onError(new Error(`Connection lost. Reconnecting... (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`));
+          } else if (event.code === 1011) {
+            this.callbacks.onError(new Error('Deepgram service error. Retrying...'));
+          } else {
+            this.callbacks.onError(new Error(`Connection closed unexpectedly (code: ${event.code}). Reconnecting...`));
+          }
+        }
+
         setTimeout(() => this.connectWebSocket(), delay);
+      } else if (!this.errorEmitted) {
+        this.errorEmitted = true;
+        this.callbacks.onError(new Error(
+          event.code === 1006
+            ? 'Connection lost. Please check your network and try again.'
+            : `Deepgram connection failed (code: ${event.code}). Please try again.`
+        ));
       }
     };
   }
@@ -152,13 +224,36 @@ export class DeepgramService {
   }
 }
 
-export async function testDeepgramKey(apiKey: string): Promise<boolean> {
-  try {
-    const response = await fetch('https://api.deepgram.com/v1/projects', {
-      headers: { Authorization: `Token ${apiKey}` },
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
+export function testDeepgramKey(apiKey: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      ws.close();
+      resolve(false);
+    }, 5000);
+
+    const ws = new WebSocket(
+      'wss://api.deepgram.com/v1/listen?model=nova-3',
+      ['token', apiKey]
+    );
+
+    ws.onopen = () => {
+      clearTimeout(timeout);
+      ws.close();
+      resolve(true);
+    };
+
+    ws.onerror = () => {
+      clearTimeout(timeout);
+      ws.close();
+      resolve(false);
+    };
+
+    ws.onclose = (event) => {
+      clearTimeout(timeout);
+      // Code 1008 = policy violation (bad auth)
+      if (event.code === 1008 || event.code === 1002) {
+        resolve(false);
+      }
+    };
+  });
 }

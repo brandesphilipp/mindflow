@@ -20,24 +20,24 @@ Mark nodes as "question" type when you identify unresolved tensions.
 Be a provocative thinking partner, not just an organizer.`,
 };
 
+const NODE_SCHEMA = {
+  type: 'object' as const,
+  properties: {
+    id: { type: 'string' as const },
+    label: { type: 'string' as const },
+    type: { type: 'string' as const, enum: ['topic', 'point', 'detail', 'action', 'question'] },
+    speaker: { type: ['string', 'null'] as const },
+    timestamp: { type: ['number', 'null'] as const },
+    confidence: { type: 'string' as const, enum: ['high', 'low'] },
+    children: { type: 'array' as const, items: { type: 'object' as const } },
+  },
+  required: ['id', 'label', 'type', 'children'],
+};
+
 const MIND_MAP_JSON_SCHEMA = {
   type: 'object' as const,
   properties: {
-    root: {
-      type: 'object' as const,
-      properties: {
-        id: { type: 'string' as const },
-        label: { type: 'string' as const },
-        type: { type: 'string' as const, enum: ['topic', 'point', 'detail', 'action', 'question'] },
-        speaker: { type: ['string', 'null'] as const },
-        timestamp: { type: ['number', 'null'] as const },
-        children: {
-          type: 'array' as const,
-          items: { $ref: '#/properties/root' },
-        },
-      },
-      required: ['id', 'label', 'type', 'speaker', 'timestamp', 'children'],
-    },
+    root: NODE_SCHEMA,
     crossReferences: {
       type: 'array' as const,
       items: {
@@ -81,8 +81,12 @@ RULES:
 9. Maximum depth: 4 levels. Prefer breadth over depth.
 10. Mark nodes with appropriate types: topic, point, detail, action, question.
 11. Preserve speaker labels exactly as provided (e.g., "Speaker 0").
+12. If text is marked [LOW CONFIDENCE], set the node's "confidence" field to "low". Otherwise set it to "high".
 
-You MUST return valid JSON matching the mind map schema. No additional text.`;
+You MUST return valid JSON matching this exact structure (children are recursive with the same shape):
+{"root":{"id":"root","label":"Topic","type":"topic","speaker":null,"timestamp":null,"children":[{"id":"n1","label":"Subtopic","type":"point","speaker":"Speaker 0","timestamp":5.2,"children":[]}]},"crossReferences":[],"metadata":{"version":1,"totalSpeakers":1,"durationSeconds":0,"lastUpdated":"2026-01-01T00:00:00.000Z"}}
+
+No additional text, just valid JSON.`;
 }
 
 export function getFullRegenSystemPrompt(level: InterpretationLevel): string {
@@ -103,8 +107,12 @@ RULES:
 10. When speakers disagree, create sibling nodes showing both perspectives.
 11. Order children by importance/relevance, not chronological order.
 12. Focus on semantic structure, not temporal order.
+13. If text is marked [LOW CONFIDENCE], set the node's "confidence" field to "low". Otherwise set it to "high".
 
-You MUST return valid JSON matching the mind map schema. No additional text.`;
+You MUST return valid JSON matching this exact structure (children are recursive with the same shape):
+{"root":{"id":"root","label":"Topic","type":"topic","speaker":null,"timestamp":null,"children":[{"id":"n1","label":"Subtopic","type":"point","speaker":"Speaker 0","timestamp":5.2,"children":[]}]},"crossReferences":[],"metadata":{"version":1,"totalSpeakers":1,"durationSeconds":0,"lastUpdated":"2026-01-01T00:00:00.000Z"}}
+
+No additional text, just valid JSON.`;
 }
 
 export function buildIncrementalUserMessage(

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { AppSettings, LLMProvider } from '../types/mindmap';
 import { testDeepgramKey } from '../services/deepgram';
 import { testLLMKey } from '../services/llm';
+import { healthCheck } from '../services/graphApi';
 
 interface SettingsPanelProps {
   isOpen: boolean;
@@ -14,7 +15,9 @@ type KeyStatus = 'idle' | 'testing' | 'valid' | 'invalid';
 
 export function SettingsPanel({ isOpen, onClose, settings, onUpdateSettings }: SettingsPanelProps) {
   const [deepgramStatus, setDeepgramStatus] = useState<KeyStatus>('idle');
-  const [llmStatus, setLlmStatus] = useState<KeyStatus>('idle');
+  const [openaiStatus, setOpenaiStatus] = useState<KeyStatus>('idle');
+  const [anthropicStatus, setAnthropicStatus] = useState<KeyStatus>('idle');
+  const [backendStatus, setBackendStatus] = useState<KeyStatus>('idle');
   const [speakerInput, setSpeakerInput] = useState<Record<number, string>>(settings.speakerNames);
 
   if (!isOpen) return null;
@@ -26,12 +29,18 @@ export function SettingsPanel({ isOpen, onClose, settings, onUpdateSettings }: S
     setDeepgramStatus(ok ? 'valid' : 'invalid');
   };
 
-  const handleTestLLM = async () => {
-    const key = settings.llmProvider === 'anthropic' ? settings.anthropicApiKey : settings.openaiApiKey;
-    if (!key) return;
-    setLlmStatus('testing');
-    const ok = await testLLMKey(settings.llmProvider, key);
-    setLlmStatus(ok ? 'valid' : 'invalid');
+  const handleTestOpenAI = async () => {
+    if (!settings.openaiApiKey) return;
+    setOpenaiStatus('testing');
+    const ok = await testLLMKey('openai', settings.openaiApiKey);
+    setOpenaiStatus(ok ? 'valid' : 'invalid');
+  };
+
+  const handleTestAnthropic = async () => {
+    if (!settings.anthropicApiKey) return;
+    setAnthropicStatus('testing');
+    const ok = await testLLMKey('anthropic', settings.anthropicApiKey);
+    setAnthropicStatus(ok ? 'valid' : 'invalid');
   };
 
   const statusIcon = (status: KeyStatus) => {
@@ -94,17 +103,47 @@ export function SettingsPanel({ isOpen, onClose, settings, onUpdateSettings }: S
             </p>
           </section>
 
-          {/* LLM Provider */}
+          {/* OpenAI API Key (Required) */}
           <section className="mb-6">
-            <h3 className="text-sm font-medium text-neutral-300 mb-2">LLM Provider</h3>
+            <h3 className="text-sm font-medium text-neutral-300 mb-2">
+              OpenAI API Key
+              <span className="ml-2 text-[10px] text-red-400 font-mono uppercase">Required</span>
+            </h3>
+            <div className="flex gap-2">
+              <input
+                type="password"
+                value={settings.openaiApiKey}
+                onChange={(e) => {
+                  onUpdateSettings({ openaiApiKey: e.target.value });
+                  setOpenaiStatus('idle');
+                }}
+                placeholder="sk-..."
+                className="flex-1 px-3 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:border-primary-500 transition-colors"
+              />
+              <button
+                onClick={handleTestOpenAI}
+                disabled={!settings.openaiApiKey}
+                className="px-3 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-sm text-neutral-300 hover:bg-neutral-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
+              >
+                Test {statusIcon(openaiStatus)}
+              </button>
+            </div>
+            <p className="mt-1.5 text-xs text-neutral-500">
+              Powers mind map structuring and knowledge graph embeddings.{' '}
+              <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-primary-400 hover:underline">
+                platform.openai.com
+              </a>
+            </p>
+          </section>
+
+          {/* LLM Provider Selection + Optional Anthropic Key */}
+          <section className="mb-6">
+            <h3 className="text-sm font-medium text-neutral-300 mb-2">LLM Provider for Mind Mapping</h3>
             <div className="flex gap-2 mb-3">
               {(['openai', 'anthropic'] as LLMProvider[]).map((provider) => (
                 <button
                   key={provider}
-                  onClick={() => {
-                    onUpdateSettings({ llmProvider: provider });
-                    setLlmStatus('idle');
-                  }}
+                  onClick={() => onUpdateSettings({ llmProvider: provider })}
                   className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
                     settings.llmProvider === provider
                       ? 'bg-primary-600/20 text-primary-300 border border-primary-500/40'
@@ -116,40 +155,75 @@ export function SettingsPanel({ isOpen, onClose, settings, onUpdateSettings }: S
               ))}
             </div>
 
-            <div className="flex gap-2">
-              <input
-                type="password"
-                value={settings.llmProvider === 'anthropic' ? settings.anthropicApiKey : settings.openaiApiKey}
-                onChange={(e) => {
-                  const key = settings.llmProvider === 'anthropic' ? 'anthropicApiKey' : 'openaiApiKey';
-                  onUpdateSettings({ [key]: e.target.value });
-                  setLlmStatus('idle');
-                }}
-                placeholder={`${settings.llmProvider === 'anthropic' ? 'Anthropic' : 'OpenAI'} API key`}
-                className="flex-1 px-3 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:border-primary-500 transition-colors"
-              />
-              <button
-                onClick={handleTestLLM}
-                disabled={!(settings.llmProvider === 'anthropic' ? settings.anthropicApiKey : settings.openaiApiKey)}
-                className="px-3 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-sm text-neutral-300 hover:bg-neutral-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
-              >
-                Test {statusIcon(llmStatus)}
-              </button>
-            </div>
-            <p className="mt-1.5 text-xs text-neutral-500">
-              {settings.llmProvider === 'openai' ? (
-                <>Get an API key at{' '}
-                  <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-primary-400 hover:underline">
-                    platform.openai.com
-                  </a>
-                </>
-              ) : (
-                <>Get an API key at{' '}
+            {settings.llmProvider === 'anthropic' && (
+              <>
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    value={settings.anthropicApiKey}
+                    onChange={(e) => {
+                      onUpdateSettings({ anthropicApiKey: e.target.value });
+                      setAnthropicStatus('idle');
+                    }}
+                    placeholder="Anthropic API key"
+                    className="flex-1 px-3 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:border-primary-500 transition-colors"
+                  />
+                  <button
+                    onClick={handleTestAnthropic}
+                    disabled={!settings.anthropicApiKey}
+                    className="px-3 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-sm text-neutral-300 hover:bg-neutral-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
+                  >
+                    Test {statusIcon(anthropicStatus)}
+                  </button>
+                </div>
+                <p className="mt-1.5 text-xs text-neutral-500">
+                  Uses Claude for mind map structuring. OpenAI key is still used for embeddings.{' '}
                   <a href="https://console.anthropic.com/" target="_blank" rel="noopener noreferrer" className="text-primary-400 hover:underline">
                     console.anthropic.com
                   </a>
-                </>
-              )}
+                </p>
+              </>
+            )}
+            {settings.llmProvider === 'openai' && (
+              <p className="text-xs text-neutral-500">
+                Uses your OpenAI key above for both mind map structuring and embeddings.
+              </p>
+            )}
+          </section>
+
+          {/* Knowledge Graph Backend */}
+          <section className="mb-6">
+            <h3 className="text-sm font-medium text-neutral-300 mb-2">
+              Knowledge Graph Backend
+              <span className="ml-2 text-[10px] text-neutral-500 font-mono uppercase">Optional</span>
+            </h3>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={settings.backendUrl}
+                onChange={(e) => {
+                  onUpdateSettings({ backendUrl: e.target.value.trim() });
+                  setBackendStatus('idle');
+                }}
+                placeholder="https://your-backend.run.app"
+                className="flex-1 px-3 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:border-primary-500 transition-colors"
+              />
+              <button
+                onClick={async () => {
+                  if (!settings.backendUrl) return;
+                  setBackendStatus('testing');
+                  const ok = await healthCheck(settings.backendUrl);
+                  setBackendStatus(ok ? 'valid' : 'invalid');
+                }}
+                disabled={!settings.backendUrl}
+                className="px-3 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-sm text-neutral-300 hover:bg-neutral-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
+              >
+                Test {statusIcon(backendStatus)}
+              </button>
+            </div>
+            <p className="mt-1.5 text-xs text-neutral-500">
+              Connect to a Graphiti backend for entity deduplication and knowledge graph features.
+              Leave empty to use client-side LLM processing.
             </p>
           </section>
 

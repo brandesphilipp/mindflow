@@ -11,6 +11,10 @@ interface ControlBarProps {
   onOpenSessions: () => void;
   onExport: () => void;
   onForceRegen: () => void;
+  onOpenInsights: () => void;
+  insightsBadge: number;
+  autoFocusEnabled: boolean;
+  onToggleAutoFocus: () => void;
   hasMap: boolean;
 }
 
@@ -32,6 +36,10 @@ export function ControlBar({
   onOpenSessions,
   onExport,
   onForceRegen,
+  onOpenInsights,
+  insightsBadge,
+  autoFocusEnabled,
+  onToggleAutoFocus,
   hasMap,
 }: ControlBarProps) {
   return (
@@ -100,6 +108,37 @@ export function ControlBar({
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
         </svg>
+      </button>
+
+      {/* Focus Lock */}
+      <button
+        onClick={onToggleAutoFocus}
+        className={`p-2 rounded-lg transition-all ${
+          autoFocusEnabled
+            ? 'text-primary-300 bg-primary-600/20'
+            : 'text-neutral-500 hover:text-neutral-300 hover:bg-neutral-800'
+        }`}
+        title={autoFocusEnabled ? 'Auto-focus ON' : 'Auto-focus OFF'}
+      >
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 3.75H6A2.25 2.25 0 0 0 3.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0 1 20.25 6v1.5M20.25 16.5V18A2.25 2.25 0 0 1 18 20.25h-1.5M3.75 16.5V18A2.25 2.25 0 0 0 6 20.25h1.5M12 9v3m0 0v3m0-3h3m-3 0H9" />
+        </svg>
+      </button>
+
+      {/* Insights */}
+      <button
+        onClick={onOpenInsights}
+        className="relative p-2 rounded-lg text-neutral-400 hover:text-primary-300 hover:bg-neutral-800 transition-all"
+        title="AI Insights"
+      >
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 0 0 1.5-.189m-1.5.189a6.01 6.01 0 0 1-1.5-.189m3.75 7.478a12.06 12.06 0 0 1-4.5 0m3.75 2.383a14.406 14.406 0 0 1-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 1 0-7.517 0c.85.493 1.509 1.333 1.509 2.316V18" />
+        </svg>
+        {insightsBadge > 0 && (
+          <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 flex items-center justify-center rounded-full bg-primary-500 text-[9px] font-bold text-white px-1">
+            {insightsBadge > 9 ? '9+' : insightsBadge}
+          </span>
+        )}
       </button>
 
       {/* Export */}

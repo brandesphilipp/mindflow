@@ -1,13 +1,32 @@
-import { useState, useCallback } from 'react';
-import type { Session, MindMap } from '../types/mindmap';
+import { useState, useCallback, useRef } from 'react';
+import type { Session, MindMap, KnowledgeGraph } from '../types/mindmap';
 
 const SESSIONS_KEY = 'mindflow_sessions';
-const MAX_SESSIONS = 10;
+const CURRENT_SESSION_KEY = 'mindflow_current_session';
+const MAX_SESSIONS = 25;
 
 function loadSessions(): Session[] {
   try {
     const stored = localStorage.getItem(SESSIONS_KEY);
-    if (stored) return JSON.parse(stored);
+    if (stored) {
+      const sessions: Session[] = JSON.parse(stored);
+      // Ensure backwards compatibility: add knowledgeGraph field if missing
+      for (const s of sessions) {
+        if (!('knowledgeGraph' in s)) {
+          (s as Session).knowledgeGraph = null;
+        }
+      }
+      // Clean up empty sessions (no mindMap, no knowledgeGraph, and no transcript) except the most recent
+      if (sessions.length > 1) {
+        const [first, ...rest] = sessions;
+        const cleaned = [first, ...rest.filter((s) => s.mindMap || s.knowledgeGraph || s.transcript)];
+        if (cleaned.length !== sessions.length) {
+          saveSessions(cleaned);
+          return cleaned;
+        }
+      }
+      return sessions;
+    }
   } catch {
     // Ignore
   }
@@ -28,15 +47,50 @@ function saveSessions(sessions: Session[]): void {
   }
 }
 
+function loadCurrentSessionId(): string | null {
+  try {
+    return localStorage.getItem(CURRENT_SESSION_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function saveCurrentSessionId(id: string | null): void {
+  try {
+    if (id) {
+      localStorage.setItem(CURRENT_SESSION_KEY, id);
+    } else {
+      localStorage.removeItem(CURRENT_SESSION_KEY);
+    }
+  } catch {
+    // Ignore
+  }
+}
+
 export function useSessions() {
   const [sessions, setSessionsState] = useState<Session[]>(loadSessions);
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [currentSessionId, setCurrentSessionIdState] = useState<string | null>(loadCurrentSessionId);
+  const creatingRef = useRef(false);
+
+  // Wrap setCurrentSessionId to also persist to localStorage
+  const setCurrentSessionId = useCallback((id: string | null) => {
+    setCurrentSessionIdState(id);
+    saveCurrentSessionId(id);
+  }, []);
 
   const createSession = useCallback((): Session => {
+    // Guard: prevent concurrent creation during React batched updates
+    if (creatingRef.current) {
+      // Return a dummy — the real session is being created
+      return { id: '', title: '', mindMap: null, knowledgeGraph: null, transcript: '', createdAt: '', updatedAt: '' };
+    }
+    creatingRef.current = true;
+
     const session: Session = {
       id: `s_${Date.now()}`,
       title: 'New Conversation',
       mindMap: null,
+      knowledgeGraph: null,
       transcript: '',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -49,11 +103,15 @@ export function useSessions() {
     });
 
     setCurrentSessionId(session.id);
+
+    // Release guard after a tick (state update batching window)
+    setTimeout(() => { creatingRef.current = false; }, 100);
+
     return session;
-  }, []);
+  }, [setCurrentSessionId]);
 
   const updateSession = useCallback(
-    (id: string, updates: Partial<Pick<Session, 'title' | 'mindMap' | 'transcript'>>) => {
+    (id: string, updates: Partial<Pick<Session, 'title' | 'mindMap' | 'knowledgeGraph' | 'transcript'>>) => {
       setSessionsState((prev) => {
         const updated = prev.map((s) =>
           s.id === id
@@ -73,7 +131,11 @@ export function useSessions() {
       saveSessions(updated);
       return updated;
     });
-    setCurrentSessionId((prev) => (prev === id ? null : prev));
+    setCurrentSessionIdState((prev) => {
+      const next = prev === id ? null : prev;
+      saveCurrentSessionId(next);
+      return next;
+    });
   }, []);
 
   const loadSession = useCallback(
@@ -84,10 +146,10 @@ export function useSessions() {
   );
 
   const autoSave = useCallback(
-    (mindMap: MindMap | null, transcript: string) => {
+    (mindMap: MindMap | null, transcript: string, knowledgeGraph?: KnowledgeGraph | null) => {
       if (!currentSessionId) return;
       const title = mindMap?.root.label || 'New Conversation';
-      updateSession(currentSessionId, { mindMap, transcript, title });
+      updateSession(currentSessionId, { mindMap, transcript, title, knowledgeGraph: knowledgeGraph ?? null });
     },
     [currentSessionId, updateSession]
   );

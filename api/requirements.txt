@@ -1,0 +1,4 @@
+graphiti-core[falkordb,anthropic]
+fastapi
+uvicorn[standard]
+python-dotenv

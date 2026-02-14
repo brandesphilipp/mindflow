@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { MindMap } from '../types/mindmap';
+import type { MindMap, KnowledgeGraph } from '../types/mindmap';
 import {
   exportToJSON,
   exportToMarkdown,
@@ -11,28 +11,35 @@ import {
 interface ExportMenuProps {
   isOpen: boolean;
   onClose: () => void;
-  mindMap: MindMap;
+  mindMap: MindMap | null;
+  knowledgeGraph?: KnowledgeGraph | null;
 }
 
-export function ExportMenu({ isOpen, onClose, mindMap }: ExportMenuProps) {
+export function ExportMenu({ isOpen, onClose, mindMap, knowledgeGraph }: ExportMenuProps) {
   const [exporting, setExporting] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
+  const isGraphMode = knowledgeGraph && knowledgeGraph.entities.length > 0;
+  const baseName = isGraphMode
+    ? 'mindflow-knowledge-graph'
+    : (mindMap?.root.label.replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '-').toLowerCase() || 'mindflow');
+
   const handleExport = async (format: string) => {
     setExporting(format);
-    const baseName = mindMap.root.label.replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '-').toLowerCase() || 'mindflow';
 
     try {
       switch (format) {
         case 'json':
-          downloadFile(exportToJSON(mindMap), `${baseName}.json`, 'application/json');
+          downloadFile(exportToJSON(mindMap, knowledgeGraph), `${baseName}.json`, 'application/json');
           break;
         case 'markdown':
-          downloadFile(exportToMarkdown(mindMap), `${baseName}.md`, 'text/markdown');
+          downloadFile(exportToMarkdown(mindMap, knowledgeGraph), `${baseName}.md`, 'text/markdown');
           break;
         case 'opml':
-          downloadFile(exportToOPML(mindMap), `${baseName}.opml`, 'text/xml');
+          if (mindMap) {
+            downloadFile(exportToOPML(mindMap), `${baseName}.opml`, 'text/xml');
+          }
           break;
         case 'png': {
           const blob = await exportToPNG('mindflow-canvas');
@@ -49,10 +56,10 @@ export function ExportMenu({ isOpen, onClose, mindMap }: ExportMenuProps) {
   };
 
   const formats = [
-    { id: 'markdown', label: 'Markdown', desc: 'Readable text with headers and bullets', icon: '📝' },
-    { id: 'json', label: 'JSON', desc: 'Raw data for re-import or processing', icon: '{ }' },
+    { id: 'markdown', label: 'Markdown', desc: isGraphMode ? 'Entities and relationships as text' : 'Readable text with headers and bullets', icon: '📝' },
+    { id: 'json', label: 'JSON', desc: isGraphMode ? 'Knowledge graph data' : 'Raw data for re-import or processing', icon: '{ }' },
     { id: 'png', label: 'PNG Image', desc: 'Screenshot of the current map', icon: '🖼' },
-    { id: 'opml', label: 'OPML', desc: 'For XMind, FreeMind, MindManager', icon: '🗂' },
+    ...(!isGraphMode && mindMap ? [{ id: 'opml', label: 'OPML', desc: 'For XMind, FreeMind, MindManager', icon: '🗂' }] : []),
   ];
 
   return (
