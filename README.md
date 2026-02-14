@@ -4,6 +4,8 @@
 
 MindFlow listens to you talk -- alone or with others -- and builds a beautiful, intelligent mind map in real time. As the conversation evolves, the map reorganizes itself, identifying themes, connections, and insights you might have missed.
 
+**[Try it live](https://mindflow-live.netlify.app)** -- no install needed, just bring your API keys.
+
 ![MindFlow Screenshot](docs/screenshot-placeholder.png)
 
 ## How it works
@@ -28,6 +30,12 @@ MindFlow listens to you talk -- alone or with others -- and builds a beautiful, 
 - **Bring your own keys** -- your API keys never touch our servers
 
 ## Quick start
+
+**Option 1: Use the hosted version**
+
+Visit [mindflow-live.netlify.app](https://mindflow-live.netlify.app) -- enter your API keys and start talking.
+
+**Option 2: Run locally**
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/mindflow.git
