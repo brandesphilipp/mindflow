@@ -1,0 +1,78 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Outfit', system-ui, sans-serif;
+  --font-mono: 'Space Mono', monospace;
+
+  --color-primary-50: #f0f4ff;
+  --color-primary-100: #dbe4ff;
+  --color-primary-200: #bac8ff;
+  --color-primary-300: #91a7ff;
+  --color-primary-400: #748ffc;
+  --color-primary-500: #5c7cfa;
+  --color-primary-600: #4c6ef5;
+  --color-primary-700: #4263eb;
+  --color-primary-800: #3b5bdb;
+  --color-primary-900: #364fc7;
+
+  --color-surface-50: #fafafa;
+  --color-surface-100: #f5f5f5;
+  --color-surface-800: #1a1a2e;
+  --color-surface-850: #141425;
+  --color-surface-900: #0f0f1e;
+  --color-surface-950: #0a0a16;
+
+  --color-node-topic: #f59e0b;
+  --color-node-point: #06b6d4;
+  --color-node-detail: #8b5cf6;
+  --color-node-action: #10b981;
+  --color-node-question: #f43f5e;
+
+  --color-speaker-0: #f59e0b;
+  --color-speaker-1: #06b6d4;
+  --color-speaker-2: #8b5cf6;
+  --color-speaker-3: #10b981;
+  --color-speaker-4: #f43f5e;
+  --color-speaker-5: #3b82f6;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+.react-flow__node {
+  transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+@keyframes pulse-recording {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.05); }
+}
+
+.recording-pulse {
+  animation: pulse-recording 1.5s ease-in-out infinite;
+}
+
+@keyframes node-enter {
+  from { opacity: 0; transform: scale(0.8); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.node-enter {
+  animation: node-enter 0.3s ease-out;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.fade-in {
+  animation: fade-in 0.3s ease-out;
+}
